@@ -1,0 +1,17 @@
+node_modules
+.next
+.git
+.github
+.vscode
+.env
+.env.*
+.agent
+.agents
+_agent
+_agents
+*.tar
+*.log
+*.db
+*.db-journal
+docs
+src/__tests__

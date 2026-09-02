@@ -1,0 +1,6 @@
+# LF in the repository on every platform. This tree had CRLF committed into part
+# of its blobs, which makes noisy diffs for anyone not on Windows and turns every
+# scripted edit into a whole-file rewrite; this keeps that from coming back.
+* text=auto eol=lf
+
+*.ico binary

@@ -1,0 +1,255 @@
+<KnowledgeGraph>
+  <Project NAME="Steam Monitor Web Service" VERSION="0.1.0">
+    <keywords>Steam API, Next.js, SQLite, Prisma, Telegram Bot, Background Jobs, Cron, Web UI, Dashboard</keywords>
+    <annotation>A highly responsive Next.js web application designed to monitor Steam libraries for a specific group of friends, sending beautifully formatted Telegram notifications whenever a new game is acquired.</annotation>
+
+    <M-DB NAME="Database Layer" TYPE="DATA_LAYER">
+      <purpose>Manages SQLite connection and provides Prisma ORM access; Game.notifiedAt records confirmed notification delivery so a game is never treated as known before it is actually reported; User.consecutiveFailures/lastError/lastErrorAt record a broken profile so it stops reading as silence</purpose>
+      <path>prisma/schema.prisma, src/lib/db.ts</path>
+      <depends>none</depends>
+      <annotations>
+        <fn-prisma PURPOSE="Global PrismaClient instance" />
+      </annotations>
+    </M-DB>
+
+    <M-JOBRUN NAME="Job Run Log" TYPE="DATA_LAYER">
+      <purpose>Records every scheduled run so silence can be told apart from failure</purpose>
+      <path>src/lib/jobRun.ts</path>
+      <depends>M-DB</depends>
+      <annotations>
+        <fn-runTracked PURPOSE="Wrap one cron callback and persist its outcome" />
+        <fn-getLastRuns PURPOSE="Latest run per job for UI, API and bot" />
+        <export-JOB_TITLES PURPOSE="Russian display name per job, Record&lt;JobName, string&gt; shared by the dashboard, /api/health and /status" />
+        <export-STALE_INTERVAL_MULTIPLIER PURPOSE="Shared missed-intervals-before-stale multiplier, used by getStaleThresholdMs" />
+        <fn-getStaleThresholdMs PURPOSE="Per-job staleness threshold in ms; free-promos/achievements add their daily off-window length so their nightly inactive hours never read as stale" />
+        <fn-isJobEnabled PURPOSE="Whether a job is currently enabled per its own settings toggle; used by /api/health, the dashboard and /status so a disabled job always renders as off, never as an alarm" />
+      </annotations>
+    </M-JOBRUN>
+
+    <M-STEAM NAME="Steam API Client" TYPE="INTEGRATION">
+      <purpose>Fetches owned games and app details from Steam API</purpose>
+      <path>src/lib/steam.ts</path>
+      <depends>none</depends>
+      <annotations>
+        <fn-getOwnedGames PURPOSE="Fetch list of owned games for a user" />
+        <fn-getAppDetails PURPOSE="Fetch details and pricing for a specific game" />
+        <fn-getAppNameFallback PURPOSE="SteamSpy fallback to get game name for delisted apps" />
+        <fn-detectFamilySharing PURPOSE="Resolve Steam family library support from app categories (supported/unsupported/unknown)" />
+        <fn-getProtonTier PURPOSE="Fetch ProtonDB compatibility tier for a game" />
+        <fn-getCompatibilityText PURPOSE="Fetch combined official Steam Deck status and ProtonDB tier for notifications" />
+        <fn-searchSteamGames PURPOSE="Search Steam store by name or pass through numeric appId" />
+        <fn-searchDiscountedFreeGames PURPOSE="Search paged Steam Store free-special candidates for regional appdetails validation" />
+        <fn-getRecentlyPlayedGames PURPOSE="Fetch recently played apps that may be absent from owned library responses" />
+        <fn-getPlayerAchievements PURPOSE="Fetch one player's achievement progress for a Steam app" />
+        <fn-getAchievementSchema PURPOSE="Fetch achievement metadata for a Steam app" />
+        <fn-getGlobalAchievementPercentages PURPOSE="Fetch global rarity percentages for achievements" />
+      </annotations>
+    </M-STEAM>
+
+    <M-STEAMHTTP NAME="Steam HTTP Gateway" TYPE="INTEGRATION">
+      <purpose>Throttles, retries and caches every Steam HTTP call in one place</purpose>
+      <path>src/lib/steamHttp.ts</path>
+      <depends>none</depends>
+      <annotations>
+        <fn-steamFetchJson PURPOSE="Fetch one Steam JSON endpoint with rate limiting, retries and optional caching" />
+        <fn-steamFetchText PURPOSE="Fetch one Steam HTML endpoint through the same policy" />
+        <fn-resetSteamHttpState PURPOSE="Drop cache and throttle state for tests and scripts" />
+        <fn-steamHttpStats PURPOSE="Expose request, cache hit and retry counters" />
+      </annotations>
+    </M-STEAMHTTP>
+
+    <M-TG NAME="Telegram Client" TYPE="INTEGRATION">
+      <purpose>Sends formatted HTML messages to Telegram, splitting oversized captions, falling back from a rejected photo to text, and retrying transient errors</purpose>
+      <path>src/lib/telegram.ts</path>
+      <depends>none</depends>
+      <annotations>
+        <fn-sendMessage PURPOSE="Send HTML message to configured chat" />
+        <fn-postToTelegram PURPOSE="Post one Telegram API call with retry on 429 and 5xx" />
+      </annotations>
+    </M-TG>
+
+    <M-CBR NAME="CBR Exchange Rate Client" TYPE="INTEGRATION">
+      <purpose>Fetches and caches KZT-to-RUB exchange rates from CBR-compatible JSON API</purpose>
+      <path>src/lib/cbr.ts</path>
+      <depends>M-DB</depends>
+      <annotations>
+        <fn-getKztRate PURPOSE="Fetch KZT rate with memory, DB, and hardcoded fallback" />
+        <fn-convertKztToRub PURPOSE="Convert Steam KZ smallest currency units to RUB" />
+      </annotations>
+    </M-CBR>
+
+    <M-PLATI NAME="Plati Price Client" TYPE="INTEGRATION">
+      <purpose>Searches Plati.ru for Steam key offers and returns the cheapest top-seller result</purpose>
+      <path>src/lib/plati.ts</path>
+      <depends>none</depends>
+      <annotations>
+        <fn-getPlatiCheapest PURPOSE="Return cheapest Steam-key offer among top sellers" />
+        <fn-marksItselfAsAddon PURPOSE="Tell a DLC/upgrade listing from a full-game listing that only bundles DLC" />
+      </annotations>
+    </M-PLATI>
+
+    <M-PRICECARD NAME="Price Card Builder" TYPE="CORE_LOGIC">
+      <purpose>Aggregates Steam RU/KZ, CBR conversion, and Plati.ru data into Telegram-ready price cards</purpose>
+      <path>src/lib/pricecard.ts</path>
+      <depends>M-STEAM, M-CBR, M-PLATI</depends>
+      <annotations>
+        <fn-buildPriceCard PURPOSE="Build unified price card for a Steam appId" />
+        <fn-formatPriceCardHtml PURPOSE="Format price card as Telegram HTML" />
+        <fn-formatFamilySharing PURPOSE="Render the shared Russian label for family library support" />
+        <fn-formatPlatiTitle PURPOSE="Escape and shorten the plati listing title shown in the card" />
+        <fn-formatWatchlistAlertHtml PURPOSE="Format watchlist discount alert with historical minimums" />
+      </annotations>
+    </M-PRICECARD>
+
+    <M-USERHEALTH NAME="User Health Constants" TYPE="DATA_LAYER">
+      <purpose>Holds USER_FAILURE_ALERT_THRESHOLD alone, with zero imports, so the server-side alert in M-CORE and the client-side marker in M-UI share one definition instead of two hand-kept-in-sync literals across the client/server bundle boundary</purpose>
+      <path>src/lib/userHealth.ts</path>
+      <depends>none</depends>
+      <annotations>
+        <export-USER_FAILURE_ALERT_THRESHOLD PURPOSE="Consecutive per-user poll failures that trigger one Telegram alert and the users-page marker" />
+      </annotations>
+    </M-USERHEALTH>
+
+    <M-CORE NAME="Core Logic" TYPE="CORE_LOGIC">
+      <purpose>Orchestrates the monitoring logic: diffs games, formats messages, updates DB, tracks and alerts on a user's consecutive per-poll failures</purpose>
+      <path>src/lib/core.ts</path>
+      <depends>M-DB, M-STEAM, M-TG, M-PRICECARD, M-USERHEALTH</depends>
+      <annotations>
+        <fn-pollAllUsers PURPOSE="Run the main background monitoring cycle; counts User.consecutiveFailures on a per-user poll failure, clears it on the next success, and sends exactly one Telegram alert (=== USER_FAILURE_ALERT_THRESHOLD, never &gt;=) so a private profile or revoked key stops reading as silence" />
+        <fn-notifyNewGame PURPOSE="Send one new-game notification and confirm it in the database" />
+        <fn-buildNewGameNotification PURPOSE="Resolve regional details and format the new-game message" />
+        <fn-formatBundleDigestMessage PURPOSE="Format one digest message announcing a bulk purchase instead of staying silent" />
+        <fn-sendTestMessage PURPOSE="Format and send a fake test notification" />
+        <fn-formatGameMessage PURPOSE="Generate HTML string from Steam data" />
+        <fn-formatRuUnavailableKzGameMessage PURPOSE="Generate HTML when RU is unavailable but KZ details exist" />
+        <fn-formatDelistedGameMessage PURPOSE="Generate HTML for delisted/unavailable games with SteamDB link" />
+        <fn-stripSecrets PURPOSE="Remove known secret values (Steam API key, Telegram token) from a message before it is stored in User.lastError or sent as a Telegram alert" />
+      </annotations>
+    </M-CORE>
+
+    <M-CRON NAME="Background Worker" TYPE="ENTRY_POINT">
+      <purpose>Registers and runs background jobs for library polling, watchlist checks, free promotion checks, and Telegram bot lifecycle</purpose>
+      <path>server.ts, src/lib/worker.ts</path>
+      <depends>M-CORE, M-DB, M-WATCHLIST, M-FREEPROMOS, M-ACHIEVEMENTS, M-TGBOT, M-JOBRUN</depends>
+      <annotations>
+        <fn-startWorker PURPOSE="Initialize the background polling job" />
+      </annotations>
+    </M-CRON>
+
+    <M-WATCHLIST NAME="Discount Watchlist" TYPE="CORE_LOGIC">
+      <purpose>Checks watched games for new discounts, records price history, and sends alerts</purpose>
+      <path>src/lib/watchlist.ts</path>
+      <depends>M-DB, M-PRICECARD, M-TG</depends>
+      <annotations>
+        <fn-checkWatchlistPrices PURPOSE="Run scheduled discount checks for watched games, triggering an alert per region (RU, KZ) independently so a game blocked in one region still alerts on the other" />
+      </annotations>
+    </M-WATCHLIST>
+
+    <M-FREEPROMOS NAME="Free-To-Keep Promotions" TYPE="CORE_LOGIC">
+      <purpose>Discovers Steam games with 100% free-to-keep promotions, filters invalid cases, deduplicates promotion keys, and sends Telegram alerts</purpose>
+      <path>src/lib/freePromotions.ts</path>
+      <depends>M-DB, M-STEAM, M-TG</depends>
+      <annotations>
+        <fn-isFreeToKeepPromotion PURPOSE="Validate regional appdetails package data as a real free-to-keep promotion" />
+        <fn-discoverFreePromotions PURPOSE="Collect paged RU/KZ free-special candidates and validate them against appdetails" />
+        <fn-formatFreePromotionMessage PURPOSE="Format Telegram HTML with regional availability and required links" />
+        <fn-checkFreePromotions PURPOSE="Run scheduled promotion discovery, dedupe, ownership filtering, and send cycle" />
+      </annotations>
+    </M-FREEPROMOS>
+
+    <M-ACHIEVEMENTS NAME="Perfect Achievements" TYPE="CORE_LOGIC">
+      <purpose>Detects Steam 100% achievement completion events using owned-game and recently-played playtime diffs plus periodic full scans, stores progress baselines, enriches messages with SteamHunters, and sends Telegram sunflower alerts</purpose>
+      <path>src/lib/achievements.ts</path>
+      <depends>M-DB, M-STEAM, M-TG</depends>
+      <annotations>
+        <fn-buildAchievementSnapshot PURPOSE="Merge Steam achievement sources into a normalized completion snapshot" />
+        <fn-formatPerfectAchievementMessage PURPOSE="Format a Telegram HTML sunflower notification" />
+        <fn-checkPerfectAchievements PURPOSE="Run scheduled achievement baseline and transition checks" />
+        <fn-selectAchievementScanPlan PURPOSE="Choose achievement API candidates from tracked library/recent-play playtime changes and stale progress states" />
+        <fn-findLatestPerfectAchievementForUser PURPOSE="Find and optionally send one user's latest historical perfect game" />
+      </annotations>
+    </M-ACHIEVEMENTS>
+
+    <M-TGBOT NAME="Telegram Bot Commands" TYPE="ENTRY_POINT">
+      <purpose>Runs Telegram long-polling command handlers for price lookup, watchlist management, and job status</purpose>
+      <path>src/lib/telegramBot.ts</path>
+      <depends>M-DB, M-STEAM, M-PRICECARD, M-TG, M-JOBRUN</depends>
+      <annotations>
+        <fn-startTelegramBot PURPOSE="Start Telegram getUpdates long-polling loop" />
+        <fn-stopTelegramBot PURPOSE="Stop Telegram getUpdates long-polling loop" />
+        <export-BOT_COMMANDS PURPOSE="Registry of every answered command with description and handler" />
+        <fn-resolveCommand PURPOSE="Resolve an incoming command name or alias to its spec" />
+        <fn-buildHelpMessage PURPOSE="Render the /help listing from the command registry" />
+        <fn-formatStatusMessage PURPOSE="Render one line per known job (/status), never omitting a job that has not run; a job that ran ok once but exceeded its own getStaleThresholdMs renders distinctly (💤), not as a stale ✅; a disabled job always renders as switched off (⏸), outranking every other state" />
+      </annotations>
+    </M-TGBOT>
+
+    <M-API NAME="REST API" TYPE="ENTRY_POINT">
+      <purpose>Next.js Route Handlers exposing endpoints for the UI</purpose>
+      <path>src/app/api/**/*.ts</path>
+      <depends>M-DB, M-CORE, M-JOBRUN</depends>
+      <annotations>
+        <fn-SettingsRoute PURPOSE="GET/POST /api/settings, including library/watchlist/free-promo controls" />
+        <fn-UsersRoute PURPOSE="GET/POST/DELETE /api/users" />
+        <fn-HistoryRoute PURPOSE="GET /api/history" />
+        <fn-TestMessageRoute PURPOSE="POST /api/test-message" />
+        <fn-AchievementTestRoute PURPOSE="POST /api/achievements/test" />
+        <fn-WatchlistRoute PURPOSE="GET/POST/DELETE /api/watchlist" />
+        <fn-HealthRoute PURPOSE="GET /api/health — ok/stale/failing status derived per job against its own getStaleThresholdMs (previously library-only); `jobs` always lists all JOB_NAMES (never omits a job with no row yet), each entry carrying `enabled` so a consumer can tell disabled from broken from never-run; no credentials exposed" />
+      </annotations>
+    </M-API>
+
+    <M-UI NAME="Web Interface" TYPE="UI_COMPONENT">
+      <purpose>React Server/Client components for the dashboard</purpose>
+      <path>src/app/**/*.tsx</path>
+      <depends>M-API, M-DB, M-JOBRUN, M-USERHEALTH</depends>
+      <annotations>
+        <fn-DashboardPage PURPOSE="Main overview with monitoring and notification counts, plus the 'Последние прогоны' job-run panel" />
+        <fn-describeJobRun PURPOSE="Exported for direct unit testing: derives a job's off/never/ok/stale/failing status against that job's own getStaleThresholdMs and enabled state; a disabled job always reads off, kept distinct from never (enabled, no row yet)" />
+        <fn-SettingsPage PURPOSE="Configuration form for credentials and monitoring jobs" />
+        <fn-UsersPage PURPOSE="User management table; marks a user whose consecutiveFailures reached USER_FAILURE_ALERT_THRESHOLD with an AlertTriangle icon carrying the last error as its hover title" />
+        <fn-HistoryPage PURPOSE="Logs table" />
+        <fn-WatchlistPage PURPOSE="Discount watchlist management" />
+      </annotations>
+    </M-UI>
+
+    <CrossLink from="M-CORE" to="M-DB" relation="reads settings and users, saves new games and history" />
+    <CrossLink from="M-CORE" to="M-STEAM" relation="fetches games and details" />
+    <CrossLink from="M-STEAM" to="M-STEAMHTTP" relation="performs every HTTP call through the gateway" />
+    <CrossLink from="M-CORE" to="M-TG" relation="dispatches notifications" />
+    <CrossLink from="M-CORE" to="M-CBR" relation="converts KZ prices to RUB for notifications" />
+    <CrossLink from="M-CORE" to="M-USERHEALTH" relation="reads the shared alert threshold constant" />
+    <CrossLink from="M-PRICECARD" to="M-STEAM" relation="fetches regional Steam prices and names" />
+    <CrossLink from="M-PRICECARD" to="M-CBR" relation="converts KZ prices to RUB" />
+    <CrossLink from="M-PRICECARD" to="M-PLATI" relation="adds third-party Steam key price comparison" />
+    <CrossLink from="M-CRON" to="M-CORE" relation="triggers polling cycle" />
+    <CrossLink from="M-CRON" to="M-DB" relation="reads polling interval config" />
+    <CrossLink from="M-CRON" to="M-WATCHLIST" relation="triggers scheduled discount checks" />
+    <CrossLink from="M-CRON" to="M-FREEPROMOS" relation="triggers scheduled free-to-keep promotion checks" />
+    <CrossLink from="M-CRON" to="M-ACHIEVEMENTS" relation="triggers scheduled perfect-achievement checks" />
+    <CrossLink from="M-CRON" to="M-TGBOT" relation="starts Telegram long-polling lifecycle" />
+    <CrossLink from="M-CRON" to="M-JOBRUN" relation="records every run" />
+    <CrossLink from="M-JOBRUN" to="M-DB" relation="persists and reads JobRun rows" />
+    <CrossLink from="M-API" to="M-DB" relation="CRUD for settings, users, and history" />
+    <CrossLink from="M-API" to="M-CORE" relation="triggers manual test messages" />
+    <CrossLink from="M-API" to="M-STEAM" relation="resolves watchlist search queries" />
+    <CrossLink from="M-API" to="M-ACHIEVEMENTS" relation="triggers manual latest sunflower tests" />
+    <CrossLink from="M-API" to="M-JOBRUN" relation="reads the latest run per job for /api/health" />
+    <CrossLink from="M-UI" to="M-API" relation="client-side data fetching and mutations" />
+    <CrossLink from="M-UI" to="M-DB" relation="server-side data fetching" />
+    <CrossLink from="M-UI" to="M-JOBRUN" relation="reads the latest run per job for the dashboard's job-run panel" />
+    <CrossLink from="M-UI" to="M-USERHEALTH" relation="the users page reads the shared alert threshold constant to render its failure marker" />
+    <CrossLink from="M-WATCHLIST" to="M-PRICECARD" relation="builds current price snapshots" />
+    <CrossLink from="M-WATCHLIST" to="M-TG" relation="sends discount alerts" />
+    <CrossLink from="M-FREEPROMOS" to="M-STEAM" relation="uses paged Steam Store free-special search and appdetails validation" />
+    <CrossLink from="M-FREEPROMOS" to="M-DB" relation="reads settings and libraries, records sent promotion keys" />
+    <CrossLink from="M-FREEPROMOS" to="M-TG" relation="sends free-to-keep promotion alerts" />
+    <CrossLink from="M-ACHIEVEMENTS" to="M-STEAM" relation="fetches owned games, recently played games, selected player achievements, schemas, and global rarity" />
+    <CrossLink from="M-ACHIEVEMENTS" to="M-DB" relation="reads settings, users, stored game/state playtime, stores achievement progress and sent completion keys" />
+    <CrossLink from="M-ACHIEVEMENTS" to="M-TG" relation="sends sunflower achievement alerts and manual tests" />
+    <CrossLink from="M-TGBOT" to="M-PRICECARD" relation="answers /price and watch confirmation commands" />
+    <CrossLink from="M-TGBOT" to="M-JOBRUN" relation="reads the latest run per job for /status" />
+    <CrossLink from="M-CORE" to="M-PRICECARD" relation="shares the family library label used in notifications" />
+
+  </Project>
+</KnowledgeGraph>

@@ -1,0 +1,181 @@
+// FILE: prisma/schema.prisma
+// VERSION: 1.1.0
+// START_MODULE_CONTRACT
+//   PURPOSE: Defines the SQLite database schema for the Steam Monitor application
+//   SCOPE: Settings, User, Game, MessageHistory, promotions, watchlist, and achievement monitoring models
+//   DEPENDS: none
+//   LINKS: M-DB
+// END_MODULE_CONTRACT
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Settings {
+  id                        Int     @id @default(1)
+  steamApiKey               String  @default("")
+  telegramToken             String  @default("")
+  telegramChatId            String  @default("")
+  checkInterval             Int     @default(15) // minutes
+  libraryPollingEnabled     Boolean @default(true)
+  watchlistEnabled          Boolean @default(true)
+  watchlistIntervalHours    Int     @default(12)
+  watchlistMinDiscountPct   Int     @default(1)
+  freePromosEnabled         Boolean @default(true)
+  freePromosIntervalHours   Int     @default(1)
+  freePromosStartHour       Int     @default(9)
+  freePromosEndHour         Int     @default(23)
+  freePromosTimezone        String  @default("Europe/Samara")
+  freePromosRegionRu        Boolean @default(true)
+  freePromosRegionKz        Boolean @default(true)
+  freePromosSkipOwnedByAll  Boolean @default(true)
+  freePromosSearchCount     Int     @default(100)
+  achievementMonitoringEnabled Boolean @default(true)
+  achievementIntervalHours     Int     @default(6)
+  achievementStartHour         Int     @default(9)
+  achievementEndHour           Int     @default(23)
+  achievementTimezone          String  @default("Europe/Samara")
+  achievementScanLimit         Int     @default(1000)
+  achievementFullScanIntervalHours Int  @default(24)
+  achievementSteamHuntersEnabled Boolean @default(true)
+  achievementTestUserId        Int?
+}
+
+model User {
+  id                          Int                           @id @default(autoincrement())
+  name                        String
+  steamId                     String                        @unique
+  // START_BLOCK_TRACK_USER_FAILURE
+  // A private profile or a revoked API key must not look like silence: consecutiveFailures
+  // counts unbroken per-user poll failures (reset to 0 on the next success), lastError/lastErrorAt
+  // record the most recent one for the users page and the one-time alert threshold in M-CORE.
+  consecutiveFailures         Int                           @default(0)
+  lastErrorAt                 DateTime?
+  lastError                   String?
+  // END_BLOCK_TRACK_USER_FAILURE
+  games                       Game[]
+  achievementProgressStates   AchievementProgressState[]
+  perfectAchievementNotifications PerfectAchievementNotification[]
+}
+
+model Game {
+  id              Int      @id @default(autoincrement())
+  appId           String
+  playtimeForever Int      @default(0)
+  discoveredAt    DateTime @default(now())
+  notifiedAt      DateTime?
+  userId          Int
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([appId, userId])
+  @@index([notifiedAt])
+}
+
+model MessageHistory {
+  id        Int      @id @default(autoincrement())
+  userName  String
+  gameName  String
+  sentAt    DateTime @default(now())
+  isTest    Boolean  @default(false)
+}
+
+model WatchedGame {
+  id                Int            @id @default(autoincrement())
+  appId             String
+  name              String
+  chatId            String         // TG chat ID or "web" for web-added
+  addedAt           DateTime       @default(now())
+  lastDiscountPct   Int            @default(0)
+  lastDiscountPctKz Int            @default(0)
+  prices            PriceHistory[]
+
+  @@unique([appId, chatId])
+}
+
+model PriceHistory {
+  id             Int          @id @default(autoincrement())
+  appId          String
+  checkedAt      DateTime     @default(now())
+  priceRuFinal   Int?         // kopecks, null = unavailable in RU
+  priceKzFinal   Int?         // tiyn
+  discountPct    Int          @default(0)
+  discountPctKz  Int          @default(0)
+  priceKzInRub   Int?         // converted via CBR rate
+  platiPriceRub  Int?         // cheapest plati.ru price in kopecks
+  watchedGame    WatchedGame  @relation(fields: [watchedGameId], references: [id], onDelete: Cascade)
+  watchedGameId  Int
+
+  @@index([appId, checkedAt])
+}
+
+model ExchangeRateCache {
+  id         Int      @id @default(1)
+  kztValue   Float
+  kztNominal Int
+  fetchedAt  DateTime @default(now())
+}
+
+model FreePromotionNotification {
+  id           Int      @id @default(autoincrement())
+  appId        String
+  name         String
+  promotionKey String
+  regions      String
+  sentAt       DateTime @default(now())
+
+  @@unique([appId, promotionKey])
+  @@index([sentAt])
+}
+
+model AchievementProgressState {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  appId         String
+  playtimeForever Int     @default(0)
+  achievedCount Int      @default(0)
+  totalCount    Int      @default(0)
+  completionKey String?
+  completedAt   DateTime?
+  lastCheckedAt DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, appId])
+  @@index([lastCheckedAt])
+}
+
+model PerfectAchievementNotification {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  appId         String
+  completionKey String
+  gameName      String
+  achievedCount Int
+  totalCount    Int
+  completedAt   DateTime?
+  sentAt        DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, appId, completionKey])
+  @@index([sentAt])
+}
+
+model JobRun {
+  id         Int       @id @default(autoincrement())
+  job        String
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  ok         Boolean?
+  processed  Int       @default(0)
+  error      String?
+
+  @@index([job, startedAt])
+}
+
+// START_CHANGE_SUMMARY
+//   LAST_CHANGE: [v1.1.0 - Added User.consecutiveFailures/lastErrorAt/lastError so a per-user poll failure (private profile, revoked key) can be counted, alerted once, and shown in the UI instead of only being logged]
+// END_CHANGE_SUMMARY

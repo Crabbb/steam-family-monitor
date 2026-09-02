@@ -1,0 +1,60 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      # @types/node must match the major of the Node runtime in the Dockerfile,
+      # so it is bumped together with the base image, not on its own.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # TEMPORARY, remove when upstream catches up — see "Известные
+      # апстрим-блокеры" in the README for the exact failures:
+      # eslint 10 breaks the eslint-plugin-react bundled by eslint-config-next,
+      # and TypeScript 7 breaks ts-jest 29 and eslint-config-next loading.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+    groups:
+      # Keep the Next.js/React toolchain moving together — they are version-coupled.
+      next-react:
+        patterns:
+          - "next"
+          - "eslint-config-next"
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      # Prisma client, adapter and CLI must stay on the same version.
+      prisma:
+        patterns:
+          - "prisma"
+          - "@prisma/*"
+          - "@libsql/client"
+      dev-tooling:
+        dependency-type: development
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "eslint-config-next"
+          - "@types/react"
+          - "@types/react-dom"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: monthly
+    ignore:
+      # Node majors are a deliberate LTS decision — Dependabot proposes the
+      # newest tag, which is Current rather than LTS for part of the year.
+      # Bump the base image by hand when a new LTS line opens.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
