@@ -1,0 +1,15 @@
+services:
+  steam-monitor:
+    build: .
+    container_name: steam-monitor
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:3000"
+    environment:
+      - TZ=Europe/Moscow
+      - DATABASE_URL=file:/app/prisma/data/dev.db
+    volumes:
+      - steam-monitor-data:/app/prisma/data
+
+volumes:
+  steam-monitor-data:

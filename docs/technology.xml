@@ -1,0 +1,30 @@
+<TechnologyStack VERSION="0.1.0">
+  <!-- Runtime and language -->
+  <Runtime>Node.js 20+</Runtime>
+  <Language>TypeScript 5.x</Language>
+
+  <!-- Framework (if applicable) -->
+  <Framework>Next.js 16 (App Router)</Framework>
+
+  <!-- Key libraries and dependencies -->
+  <Dependencies>
+    <dep name="@libsql/client" version="0.17.x" purpose="SQLite/libSQL driver for Prisma adapter" />
+    <dep name="@prisma/client" version="7.4.x" purpose="ORM client for database access" />
+    <dep name="prisma" version="7.4.x" purpose="Schema tooling and client generation" />
+    <dep name="node-cron" version="4.2.x" purpose="Background polling task scheduler" />
+    <dep name="tailwindcss" version="4.x" purpose="Utility-first CSS framework for styling" />
+    <dep name="lucide-react" version="0.x" purpose="Icon library" />
+  </Dependencies>
+
+  <!-- Version constraints -->
+  <VersionConstraints>
+    <constraint lib="next" min="16.0.0" max="16.x" reason="Using Next.js 16 App Router features and custom server patterns" />
+  </VersionConstraints>
+
+  <!-- Build and tooling -->
+  <Tooling>
+    <tool name="bundler" value="Turbopack (next)" version="16.x" />
+    <tool name="linter" value="eslint" version="9.x" />
+    <tool name="test-runner" value="jest + ts-jest" version="30.x" />
+  </Tooling>
+</TechnologyStack>

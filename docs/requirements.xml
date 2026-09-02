@@ -1,0 +1,66 @@
+<RequirementsAnalysis VERSION="0.1.0">
+  <UseCases>
+    <UC-001>
+      <Actor>Administrator</Actor>
+      <Action>Configures global settings (Steam API Key, Telegram Token, Chat ID, Interval)</Action>
+      <Goal>To authenticate the bot and Steam watcher, and set polling frequency</Goal>
+      <AcceptanceCriteria>Settings are securely saved in SQLite database</AcceptanceCriteria>
+    </UC-001>
+
+    <UC-002>
+      <Actor>Administrator</Actor>
+      <Action>Manages Monitored Users (Add, Edit, Delete)</Action>
+      <Goal>To define whose Steam libraries to monitor</Goal>
+      <AcceptanceCriteria>Users are persisted in the database with their Name and SteamID</AcceptanceCriteria>
+    </UC-002>
+
+    <UC-003>
+      <Actor>Administrator</Actor>
+      <Action>Clicks "Send Test Message" for a user</Action>
+      <Goal>To verify Telegram bot configuration and formatting</Goal>
+      <AcceptanceCriteria>A fake game notification is sent to the Telegram chat with a [ТЕСТ] prefix and added to history</AcceptanceCriteria>
+    </UC-003>
+
+    <UC-004>
+      <Actor>System</Actor>
+      <Action>Periodically polls Steam API for all monitored users</Action>
+      <Goal>To detect newly added or purchased games</Goal>
+      <AcceptanceCriteria>New games are detected, formatted gracefully (with pricing and tags), sent to Telegram, and saved to DB so they aren't repeated</AcceptanceCriteria>
+    </UC-004>
+
+    <UC-005>
+      <Actor>Administrator</Actor>
+      <Action>Views the History page in Web UI</Action>
+      <Goal>To see a log of all previously sent Telegram notifications</Goal>
+      <AcceptanceCriteria>History table displays the user, game name, timestamp, and test flag</AcceptanceCriteria>
+    </UC-005>
+
+    <UC-006>
+      <Actor>Administrator</Actor>
+      <Action>Uses Telegram /price command for a game name or Steam appId</Action>
+      <Goal>To compare Steam RU, Steam KZ converted to RUB, and Plati.ru prices</Goal>
+      <AcceptanceCriteria>Bot returns a formatted price card, handles multiple search results, and avoids non-Steam Plati.ru offers</AcceptanceCriteria>
+    </UC-006>
+
+    <UC-007>
+      <Actor>Administrator</Actor>
+      <Action>Adds games to discount watchlist from Web UI or Telegram /watch command</Action>
+      <Goal>To receive Telegram notifications when a tracked game receives a new Steam discount</Goal>
+      <AcceptanceCriteria>Watched games and price history are persisted; scheduled checks alert on discount transitions from 0% to a positive value</AcceptanceCriteria>
+    </UC-007>
+
+    <UC-008>
+      <Actor>System</Actor>
+      <Action>Checks Steam Store Search for 100% discounted free-to-keep games in RU and KZ</Action>
+      <Goal>To announce temporary free-to-keep promotions without repeating the same current promotion</Goal>
+      <AcceptanceCriteria>Only appdetails-validated games are sent; DLC, free weekends, already-announced promotion keys, and games owned by all monitored users are skipped</AcceptanceCriteria>
+    </UC-008>
+
+    <UC-009>
+      <Actor>System</Actor>
+      <Action>Checks monitored users' Steam achievements for newly completed 100% games</Action>
+      <Goal>To congratulate users when they earn a "sunflower" perfect-achievement completion</Goal>
+      <AcceptanceCriteria>Historical perfect games are baselined without spam; scheduled checks use owned-game and recently-played playtime diffs plus stale-state full scans before calling per-app achievement APIs; future completion transitions are deduplicated by completion key; manual tests can send the latest historical perfect game for a selected user</AcceptanceCriteria>
+    </UC-009>
+  </UseCases>
+</RequirementsAnalysis>

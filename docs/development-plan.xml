@@ -1,0 +1,385 @@
+<DevelopmentPlan VERSION="0.1.0">
+  <Modules>
+    <M-DB NAME="Database Layer" TYPE="DATA_LAYER" LAYER="0" ORDER="1">
+      <contract>
+        <purpose>Manages SQLite connection and provides Prisma ORM access</purpose>
+        <inputs>
+          <param name="query" type="PrismaQuery" />
+        </inputs>
+        <outputs>
+          <param name="result" type="Entity | Entity[]" />
+        </outputs>
+        <errors>
+          <error code="DB_CONNECTION_FAILED" />
+          <error code="RECORD_NOT_FOUND" />
+        </errors>
+      </contract>
+      <interface>
+        <export-prisma PURPOSE="Global PrismaClient instance" />
+      </interface>
+      <depends>none</depends>
+    </M-DB>
+
+    <M-STEAM NAME="Steam API Client" TYPE="INTEGRATION" LAYER="1" ORDER="1">
+      <contract>
+        <purpose>Fetches owned games and app details from Steam API</purpose>
+        <inputs>
+          <param name="steamId" type="string" />
+          <param name="appId" type="string" />
+          <param name="apiKey" type="string" />
+        </inputs>
+        <outputs>
+          <param name="games" type="SteamGame[]" />
+          <param name="details" type="SteamAppDetails" />
+        </outputs>
+        <errors>
+          <error code="STEAM_API_RATE_LIMIT" />
+          <error code="STEAM_PROFILE_PRIVATE" />
+        </errors>
+      </contract>
+      <interface>
+        <export-getOwnedGames PURPOSE="Fetch list of owned games for a user" />
+        <export-getAppDetails PURPOSE="Fetch details and pricing for a specific game" />
+        <export-getCompatibilityText PURPOSE="Fetch official Steam Deck status plus ProtonDB tier for notification display" />
+        <export-searchDiscountedFreeGames PURPOSE="Search regional Steam Store rows for 100% discounted game candidates" />
+        <export-getRecentlyPlayedGames PURPOSE="Fetch recently played apps for achievement candidate detection" />
+        <export-getPlayerAchievements PURPOSE="Fetch one player's achievement progress for a Steam app" />
+        <export-getAchievementSchema PURPOSE="Fetch achievement metadata for a Steam app" />
+        <export-getGlobalAchievementPercentages PURPOSE="Fetch global achievement rarity percentages for a Steam app" />
+      </interface>
+      <depends>none</depends>
+    </M-STEAM>
+
+    <M-TG NAME="Telegram Client" TYPE="INTEGRATION" LAYER="1" ORDER="2">
+      <contract>
+        <purpose>Sends formatted HTML messages to Telegram</purpose>
+        <inputs>
+          <param name="htmlMessage" type="string" />
+          <param name="chatId" type="string" />
+          <param name="botToken" type="string" />
+        </inputs>
+        <outputs>
+          <param name="success" type="boolean" />
+        </outputs>
+        <errors>
+          <error code="TELEGRAM_API_ERROR" />
+        </errors>
+      </contract>
+      <interface>
+        <export-sendMessage PURPOSE="Send HTML message to configured chat" />
+      </interface>
+      <depends>none</depends>
+    </M-TG>
+
+    <M-CBR NAME="CBR Exchange Rate Client" TYPE="INTEGRATION" LAYER="1" ORDER="3">
+      <contract>
+        <purpose>Fetches and caches KZT-to-RUB exchange rates</purpose>
+        <inputs>
+          <param name="priceKztFinal" type="number" />
+        </inputs>
+        <outputs>
+          <param name="rate" type="KztRate" />
+          <param name="rubles" type="number" />
+        </outputs>
+        <errors>
+          <error code="CBR_API_UNAVAILABLE" />
+        </errors>
+      </contract>
+      <interface>
+        <export-getKztRate PURPOSE="Fetch KZT rate with fallback chain" />
+        <export-convertKztToRub PURPOSE="Convert KZT smallest units to RUB" />
+      </interface>
+      <depends>M-DB</depends>
+    </M-CBR>
+
+    <M-PLATI NAME="Plati Price Client" TYPE="INTEGRATION" LAYER="1" ORDER="4">
+      <contract>
+        <purpose>Searches Plati.ru and returns Steam-key price candidates</purpose>
+        <inputs>
+          <param name="gameName" type="string" />
+        </inputs>
+        <outputs>
+          <param name="result" type="PlatiResult | null" />
+        </outputs>
+        <errors>
+          <error code="PLATI_API_UNAVAILABLE" />
+        </errors>
+      </contract>
+      <interface>
+        <export-getPlatiCheapest PURPOSE="Return cheapest Steam-key offer among top sellers" />
+      </interface>
+      <depends>none</depends>
+    </M-PLATI>
+
+    <M-PRICECARD NAME="Price Card Builder" TYPE="CORE_LOGIC" LAYER="2" ORDER="2">
+      <contract>
+        <purpose>Aggregates regional Steam prices, CBR conversion, and Plati.ru offers</purpose>
+        <inputs>
+          <param name="appId" type="string" />
+        </inputs>
+        <outputs>
+          <param name="card" type="PriceCardData | null" />
+        </outputs>
+        <errors>
+          <error code="PRICECARD_BUILD_FAILED" />
+        </errors>
+      </contract>
+      <interface>
+        <export-buildPriceCard PURPOSE="Build unified price card" />
+        <export-formatPriceCardHtml PURPOSE="Format price card as Telegram HTML" />
+        <export-formatWatchlistAlertHtml PURPOSE="Format discount alert HTML" />
+      </interface>
+      <depends>M-STEAM, M-CBR, M-PLATI</depends>
+    </M-PRICECARD>
+
+    <M-CORE NAME="Core Logic" TYPE="CORE_LOGIC" LAYER="2" ORDER="1">
+      <contract>
+        <purpose>Orchestrates the monitoring logic: diffs games, formats messages, updates DB</purpose>
+        <inputs>
+          <param name="trigger" type="CronTick | ManualTest" />
+        </inputs>
+        <outputs>
+          <param name="results" type="PollingResult" />
+        </outputs>
+        <errors>
+          <error code="POLLING_FAILED" />
+        </errors>
+      </contract>
+      <interface>
+        <export-pollAllUsers PURPOSE="Run the main background monitoring cycle" />
+        <export-sendTestMessage PURPOSE="Format and send a fake test notification" />
+        <export-formatGameMessage PURPOSE="Generate HTML string from Steam data" />
+        <export-formatRuUnavailableKzGameMessage PURPOSE="Generate HTML when RU is unavailable but KZ details exist" />
+      </interface>
+      <depends>M-DB, M-STEAM, M-TG</depends>
+    </M-CORE>
+
+    <M-CRON NAME="Background Worker" TYPE="ENTRY_POINT" LAYER="3" ORDER="1">
+      <contract>
+        <purpose>Registers and runs library polling, watchlist, free-promotion, and Telegram bot background jobs</purpose>
+        <inputs>
+          <param name="configInterval" type="number" />
+        </inputs>
+        <outputs>
+          <param name="status" type="void" />
+        </outputs>
+        <errors>
+          <error code="CRON_START_FAILED" />
+        </errors>
+      </contract>
+      <interface>
+        <export-startWorker PURPOSE="Initialize the background polling job" />
+      </interface>
+      <depends>M-CORE, M-DB, M-WATCHLIST, M-FREEPROMOS, M-ACHIEVEMENTS, M-TGBOT</depends>
+    </M-CRON>
+
+    <M-WATCHLIST NAME="Discount Watchlist" TYPE="CORE_LOGIC" LAYER="2" ORDER="3">
+      <contract>
+        <purpose>Checks watched games for discount changes and records price history</purpose>
+        <inputs>
+          <param name="trigger" type="CronTick" />
+        </inputs>
+        <outputs>
+          <param name="status" type="void" />
+        </outputs>
+        <errors>
+          <error code="WATCHLIST_CHECK_FAILED" />
+        </errors>
+      </contract>
+      <interface>
+        <export-checkWatchlistPrices PURPOSE="Run scheduled discount checks" />
+      </interface>
+      <depends>M-DB, M-PRICECARD, M-TG</depends>
+    </M-WATCHLIST>
+
+    <M-FREEPROMOS NAME="Free-To-Keep Promotions" TYPE="CORE_LOGIC" LAYER="2" ORDER="4">
+      <contract>
+        <purpose>Discovers and announces appdetails-validated Steam 100% free-to-keep promotions</purpose>
+        <inputs>
+          <param name="settings" type="Settings" />
+          <param name="regions" type="FreePromoRegion[]" />
+        </inputs>
+        <outputs>
+          <param name="promotions" type="FreePromotionData[]" />
+        </outputs>
+        <errors>
+          <error code="FREE_PROMO_CHECK_FAILED" />
+        </errors>
+      </contract>
+      <interface>
+        <export-isFreeToKeepPromotion PURPOSE="Validate appdetails package data" />
+        <export-discoverFreePromotions PURPOSE="Find current RU/KZ free-to-keep promotions" />
+        <export-formatFreePromotionMessage PURPOSE="Format Telegram HTML alert" />
+        <export-checkFreePromotions PURPOSE="Run scheduled discovery and notification cycle" />
+      </interface>
+      <depends>M-DB, M-STEAM, M-TG</depends>
+    </M-FREEPROMOS>
+
+    <M-ACHIEVEMENTS NAME="Perfect Achievements" TYPE="CORE_LOGIC" LAYER="2" ORDER="5">
+      <contract>
+        <purpose>Detects and announces newly completed Steam 100% achievement games from owned/recent playtime-change candidates plus periodic full-scan reconciliation</purpose>
+        <inputs>
+          <param name="settings" type="Settings" />
+          <param name="user" type="User" />
+          <param name="appId" type="string" />
+        </inputs>
+        <outputs>
+          <param name="snapshot" type="AchievementSnapshot | null" />
+        </outputs>
+        <errors>
+          <error code="ACHIEVEMENT_CHECK_FAILED" />
+          <error code="STEAM_ACHIEVEMENTS_PRIVATE" />
+        </errors>
+      </contract>
+      <interface>
+        <export-buildAchievementSnapshot PURPOSE="Merge Steam player/schema/global achievement data" />
+        <export-formatPerfectAchievementMessage PURPOSE="Format Telegram sunflower HTML alert" />
+        <export-checkPerfectAchievements PURPOSE="Run scheduled baseline and transition checks" />
+        <export-findLatestPerfectAchievementForUser PURPOSE="Find and send a manual latest-perfect test" />
+      </interface>
+      <depends>M-DB, M-STEAM, M-TG</depends>
+    </M-ACHIEVEMENTS>
+
+    <M-TGBOT NAME="Telegram Bot Commands" TYPE="ENTRY_POINT" LAYER="3" ORDER="3">
+      <contract>
+        <purpose>Handles Telegram /price, /watch, /unwatch, and /watchlist commands</purpose>
+        <inputs>
+          <param name="update" type="TelegramUpdate" />
+        </inputs>
+        <outputs>
+          <param name="reply" type="TelegramMessage" />
+        </outputs>
+        <errors>
+          <error code="TELEGRAM_POLLING_FAILED" />
+        </errors>
+      </contract>
+      <interface>
+        <export-startTelegramBot PURPOSE="Start long-polling loop" />
+        <export-stopTelegramBot PURPOSE="Stop long-polling loop" />
+      </interface>
+      <depends>M-DB, M-STEAM, M-PRICECARD, M-TG</depends>
+    </M-TGBOT>
+
+    <M-API NAME="REST API" TYPE="ENTRY_POINT" LAYER="3" ORDER="2">
+      <contract>
+        <purpose>Next.js Route Handlers exposing endpoints for the UI</purpose>
+        <inputs>
+          <param name="httpRequest" type="Request" />
+        </inputs>
+        <outputs>
+          <param name="httpResponse" type="Response" />
+        </outputs>
+        <errors>
+          <error code="INVALID_REQUEST_BODY" />
+          <error code="INTERNAL_SERVER_ERROR" />
+        </errors>
+      </contract>
+      <interface>
+        <export-SettingsRoute PURPOSE="GET/POST /api/settings with monitoring job controls" />
+        <export-UsersRoute PURPOSE="GET/POST/DELETE /api/users" />
+        <export-HistoryRoute PURPOSE="GET /api/history" />
+        <export-TestMessageRoute PURPOSE="POST /api/test-message" />
+        <export-AchievementTestRoute PURPOSE="POST /api/achievements/test" />
+        <export-WatchlistRoute PURPOSE="GET/POST/DELETE /api/watchlist" />
+      </interface>
+      <depends>M-DB, M-CORE, M-STEAM, M-ACHIEVEMENTS</depends>
+    </M-API>
+
+    <M-UI NAME="Web Interface" TYPE="UI_COMPONENT" LAYER="4" ORDER="1">
+      <contract>
+        <purpose>React Server/Client components for the dashboard</purpose>
+        <inputs>
+          <param name="userData" type="Interaction" />
+        </inputs>
+        <outputs>
+          <param name="html" type="ReactElement" />
+        </outputs>
+        <errors>
+          <error code="PAGE_LOAD_ERROR" />
+        </errors>
+      </contract>
+      <interface>
+        <export-DashboardPage PURPOSE="Main overview" />
+        <export-SettingsPage PURPOSE="Configuration form for credentials and monitoring jobs" />
+        <export-UsersPage PURPOSE="User management table" />
+        <export-HistoryPage PURPOSE="Logs table" />
+        <export-WatchlistPage PURPOSE="Discount watchlist management" />
+      </interface>
+      <depends>M-API (via HTTP), M-DB (Server Components)</depends>
+    </M-UI>
+  </Modules>
+
+  <DataFlow>
+    <DF-POLLING NAME="Background Polling Cycle" TRIGGER="Cron Timer">
+      <step-1 module="M-CRON">Timer triggers, calls M-CORE.pollAllUsers()</step-1>
+      <step-2 module="M-CORE">Requests Settings and Users from M-DB</step-2>
+      <step-3 module="M-CORE">For each User, calls M-STEAM.getOwnedGames()</step-3>
+      <step-4 module="M-CORE">Compares result with existing Games in M-DB. Identifies new appIds.</step-4>
+      <step-5 module="M-CORE">For each new appId, calls M-STEAM.getAppDetails()</step-5>
+      <step-6 module="M-CORE">Formats HTML payload via formatGameMessage()</step-6>
+      <step-7 module="M-CORE">Calls M-TG.sendMessage() to dispatch to Telegram</step-7>
+      <step-8 module="M-CORE">Saves new Games and History record to M-DB</step-8>
+    </DF-POLLING>
+
+    <DF-WATCHLIST NAME="Discount Watchlist Cycle" TRIGGER="Cron Timer">
+      <step-1 module="M-CRON">Timer triggers M-WATCHLIST.checkWatchlistPrices()</step-1>
+      <step-2 module="M-WATCHLIST">Reads watched games from M-DB</step-2>
+      <step-3 module="M-PRICECARD">Builds current RU/KZ/Plati price snapshot</step-3>
+      <step-4 module="M-WATCHLIST">Saves PriceHistory and compares discount transition</step-4>
+      <step-5 module="M-TG">Sends Telegram alert when discount appears</step-5>
+    </DF-WATCHLIST>
+
+    <DF-FREEPROMOS NAME="Free-To-Keep Promotion Cycle" TRIGGER="Cron Timer">
+      <step-1 module="M-CRON">Timer triggers M-FREEPROMOS.checkFreePromotions()</step-1>
+      <step-2 module="M-FREEPROMOS">Reads settings and configured regions from M-DB</step-2>
+      <step-3 module="M-STEAM">Searches Steam Store discounted-free game rows for RU/KZ</step-3>
+      <step-4 module="M-STEAM">Validates each app through appdetails package data</step-4>
+      <step-5 module="M-FREEPROMOS">Skips DLC, free weekends, already-sent promotion keys, and games owned by all users</step-5>
+      <step-6 module="M-TG">Sends Telegram promotion alert with Steam, SteamDB, and ProtonDB links</step-6>
+      <step-7 module="M-DB">Records sent appId and promotionKey for dedupe</step-7>
+    </DF-FREEPROMOS>
+
+    <DF-ACHIEVEMENTS NAME="Perfect Achievement Cycle" TRIGGER="Cron Timer">
+      <step-1 module="M-CRON">Timer triggers M-ACHIEVEMENTS.checkPerfectAchievements()</step-1>
+      <step-2 module="M-ACHIEVEMENTS">Reads settings and monitored users from M-DB</step-2>
+      <step-3 module="M-STEAM">Fetches owned games and recently played games for playtime comparison</step-3>
+      <step-4 module="M-ACHIEVEMENTS">Selects per-app achievement candidates from changed owned/recent playtime, missing baselines, or stale progress states</step-4>
+      <step-5 module="M-STEAM">Fetches achievement progress only for selected candidate apps</step-5>
+      <step-6 module="M-ACHIEVEMENTS">Builds a normalized snapshot with global rarity and optional SteamHunters stats when a transition must be announced</step-6>
+      <step-7 module="M-DB">Updates achievement progress baseline and stored game playtime for each checked candidate</step-7>
+      <step-8 module="M-TG">Sends a sunflower alert only when an existing non-current state transitions to a new completion key</step-8>
+      <step-9 module="M-DB">Records sent completion keys for dedupe</step-9>
+    </DF-ACHIEVEMENTS>
+  </DataFlow>
+
+  <ImplementationOrder>
+    <Phase-1 name="Database Foundation" status="implemented">
+      <step-1 module="M-DB">Init Prisma, create schema (SQLite), generate client</step-1>
+    </Phase-1>
+    <Phase-2 name="Integration Layer" status="implemented">
+      <step-1 module="M-STEAM">Implement Steam API wrappers</step-1>
+      <step-2 module="M-TG">Implement Telegram sender</step-2>
+    </Phase-2>
+    <Phase-3 name="Core Logic &amp; Polling" status="implemented">
+      <step-1 module="M-CORE">Implement core diffing and formatting logic</step-1>
+      <step-2 module="M-CRON">Set up node-cron custom server.js</step-2>
+    </Phase-3>
+    <Phase-4 name="API &amp; Web UI" status="implemented">
+      <step-1 module="M-API">Create Next.js API Routes</step-1>
+      <step-2 module="M-UI">Build Tailwind React components</step-2>
+    </Phase-4>
+    <Phase-5 name="Free-To-Keep Promotions" status="implemented">
+      <step-1 module="M-STEAM">Add Steam Store Search parser for 100% discounted game candidates</step-1>
+      <step-2 module="M-FREEPROMOS">Add promotion validation, message formatting, dedupe, and ownership filtering</step-2>
+      <step-3 module="M-CRON">Schedule daytime free-promotion checks from Settings</step-3>
+      <step-4 module="M-UI">Expose library, watchlist, and free-promotion controls</step-4>
+    </Phase-5>
+    <Phase-6 name="Perfect Achievements" status="implemented">
+      <step-1 module="M-STEAM">Add Steam achievement API wrappers</step-1>
+      <step-2 module="M-ACHIEVEMENTS">Add snapshot building, transition detection, dedupe, and Telegram formatting</step-2>
+      <step-3 module="M-CRON">Schedule daytime perfect-achievement checks from Settings</step-3>
+      <step-4 module="M-UI">Expose achievement monitoring controls and manual latest sunflower test</step-4>
+      <step-5 module="M-ACHIEVEMENTS">Optimize scheduled scans with stored playtime diffs, recently played fallback, and configurable full-scan window</step-5>
+    </Phase-6>
+  </ImplementationOrder>
+</DevelopmentPlan>
